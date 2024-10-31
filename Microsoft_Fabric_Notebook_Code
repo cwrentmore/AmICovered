@@ -1,0 +1,116 @@
+Am I Covered? – Microsoft Fabric Notebook Code
+
+Cell 1 – User Input
+
+import ipywidgets as widgets
+from IPython.display import display
+
+# Create a dropdown
+dropdown = widgets.Dropdown(
+    options=['Surgery', 'X-Ray', 'Blood Test'],
+    value='Surgery',
+    description='Service:',
+    disabled=False,
+)
+
+# Create a button
+button = widgets.Button(
+    description='Submit',
+    disabled=False,
+    button_style='',  # 'success', 'info', 'warning', 'danger' or ''
+    tooltip='Click me',
+    icon='check'  # (FontAwesome names without the `fa-` prefix)
+)
+
+# Display widgets
+print("Welcome to your Health Insurance Online Portal")
+print("Thank you for logging in.")
+print("Your Patient ID is 2000")
+print("")
+print("Please select a service to see if you are covered.")
+print("")
+display(dropdown)
+print("")
+display(button)
+ 
+# Define event handler
+def on_button_click(b):
+    print(f'Your selection: {dropdown.value}')
+    global service
+    service = dropdown.value
+    
+# Attach event handler to button
+button.on_click(on_button_click)
+
+
+
+Cell 2 – Grab data from various Lakehouse Data Sources
+
+from pyspark.sql import SparkSession
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("QueryTable").getOrCreate()
+
+"""
+Grab data from all of the various sources in the lakehouse 
+to determine if your service will be covered.
+The data would come from many other sources in
+a real life scenario but this shows the feasibility in simple terms.
+"""
+
+# Grab the deductible
+df = spark.sql("SELECT * FROM healthplans WHERE PatientID = '2000'")
+global deductible
+deductible = df.collect()[0]['Deductible']
+
+# Grab the cost of the service
+df = spark.sql("SELECT * FROM services WHERE ServiceName = '" + str(service) + "'")
+global servicecost
+global serviceid
+servicecost = df.collect()[0]['Cost']
+serviceid = df.collect()[0]['ServiceID']
+ 
+
+# Grab the sum of all previously paid invoices
+df = spark.sql("SELECT sum(AmountPaid) as AmountPaid FROM invoices WHERE PatientID = '2000'")
+global amountpaid
+amountpaid = df.collect()[0]['AmountPaid']
+
+# Now grab service type from an AzureDB mirrored database
+df = spark.sql("SELECT * FROM ServiceLocations WHERE ServiceID = " + str(serviceid))
+#df = spark.sql("SELECT * FROM ServiceLocations")
+global servicetype
+servicetype = df.collect()[0]['ServiceType']
+
+# Display the result
+print(deductible)
+print(servicecost)
+print(serviceid)
+print(amountpaid)
+print(servicetype)
+
+
+
+Cell 3 – Initialize the OpenAI Chat Completion API
+
+import os
+import openai
+openai.api_type = "azure"
+openai.api_version = "2024-08-01-preview"
+openai.api_base = "https://mango-bush-0a9e12903.5.azurestaticapps.net/api/v1"
+openai.api_key = "yourkey"
+ 
+
+Cell 4 – Submit the prompt to the Open AI Chat Completion
+from openai import OpenAI
+
+response = openai.chat.completions.create( 
+    model="gpt-35-turbo-16k", 
+    messages=[ 
+        {"role": "system", "content": "You are a helpful assistant that answers questions about health insurance and coverage for medical issues.  Specifically you know the deductible amount for a plan is " + str(deductible) + " and someone has previously paid a total of " + str(amountpaid) + " during the plan year.  Assume the user just wants to know if the cost of a procedure will or will not go over the deductible amount and state the amount owed until the deductible is met along with any amount covered."}, 
+        {"role": "user", "content": "Will I be covered by my health plan if the service I want done is " + str(service) + "?  The cost of the " + str(servicetype) + " procedure is " + str(servicecost)} 
+    ] 
+)
+
+response.choices[0].message.content
+
